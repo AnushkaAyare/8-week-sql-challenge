@@ -7,7 +7,7 @@ Six case studies from Danny Ma's [8 Week SQL Challenge](https://8weeksqlchalleng
 | # | Topic | Key Skills |
 |---|---|---|
 | 1 | [Danny's Diner](./case-study-1-dannys-diner) | Joins, CTEs, Window Functions |
-| 2 | [Pizza Runner](./case-study-2-pizza-runner) | Data Cleaning, NULL Handling, Aggregations |
+| 2 | [Pizza Runner](./case-study-2-%20Pizza%20Runner) | Data Cleaning, NULL Handling, Aggregations |
 | 3 | Foodie-Fi | Churn Analysis, Subscription Patterns |
 | 4 | Data Bank | Running Balances, Financial Aggregations |
 | 5 | Data Mart | Before/After Analysis, Date Functions |
