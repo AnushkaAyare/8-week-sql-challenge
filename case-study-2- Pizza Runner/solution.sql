@@ -259,7 +259,7 @@ LEFT JOIN extra_names x ON c.order_id = x.order_id AND c.pizza_id = x.pizza_id
 ORDER BY c.order_id;
 
 -- C5: Generate an alphabetically ordered comma separated ingredient list for each pizza order from the customer_orders table and add a 2x in front of any relevant ingredients
-For example: "Meat Lovers: 2xBacon, Beef, ... , Salami"
+--For example: "Meat Lovers: 2xBacon, Beef, ... , Salami"
 WITH base_ingredients AS (
     SELECT c.order_id, c.pizza_id, p.topping_id
     FROM customer_orders_cleaned c
