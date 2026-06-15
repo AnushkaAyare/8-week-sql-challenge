@@ -1,26 +1,17 @@
-# 8 Week SQL Challenge
-real-world SQL — messy data, business context, actual decisions to make.
+8 Week SQL Challenge
 
-I picked 6 out of 8 case studies that directly map to analytics and 
-data science work. Each solution is written with clean, readable SQL 
-and a focus on the business question, not just the query output.
+Six case studies from Danny Ma's 8 Week SQL Challenge, each focused on a different real-world business problem — messy data, ambiguous requirements, and a question to actually answer, not just a query to run.
 
----
+Case Studies
 
-## Case Studies
+#TopicKey Skills1Danny's DinerJoins, CTEs, Window Functions2Pizza RunnerData Cleaning, NULL Handling, Aggregations3Foodie-FiChurn Analysis, Subscription Patterns4Data BankRunning Balances, Financial Aggregations5Data MartBefore/After Analysis, Date Functions6Clique BaitFunnel Analysis, Conversion Rates
 
-| # | Topic | Key Skills |
-|---|---|---|
-| 1 | Danny's Diner | Joins, CTEs, Window Functions |
-| 2 | Pizza Runner | Data Cleaning, NULL Handling, Aggregations |
-| 3 | Foodie-Fi | Churn Analysis, Subscription Patterns |
-| 4 | Data Bank | Running Balances, Financial Aggregations |
-| 5 | Data Mart | Before/After Analysis, Date Functions |
-| 6 | Clique Bait | Funnel Analysis, Conversion Rates |
+Approach
 
----
-## Why these 6?
+Each solution is written in clean, readable SQL with a focus on the business question behind each query — not just the output. Where the source data needed cleaning (inconsistent nulls, mixed types, messy strings), that's handled explicitly before any analysis begins.
 
-Each case study was chosen because it teaches a concept 
-that shows up in real DA/DS job and interviews — 
-not just to complete a checklist.
+Every case study folder has its own README covering the business problem, approach, and key takeaways.
+
+Why These 6
+
+These 6 (out of 8) were chosen because each one maps to a concept that comes up repeatedly in real DA/DS work and interviews: joins and window functions, data cleaning, churn analysis, running balances, date-based comparisons, and funnel analysis.
