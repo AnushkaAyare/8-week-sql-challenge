@@ -13,7 +13,7 @@ All 8 case studies from Danny Ma's [8 Week SQL Challenge](https://8weeksqlchalle
 | 3 | [Foodie-Fi](./case-study-3-foodie-fi) | Churn Analysis, Subscription Patterns | Complete |
 | 4 | [Data Bank](./case-study-4-data-bank) | Running Balances, Financial Aggregations | Complete |
 | 5 | [Data Mart](./case-study-5-data-mart) | Before/After Analysis, Date Functions | Complete |
-| 6 | Clique Bait | Funnel Analysis, Conversion Rates | Upcoming |
+| 6 | [Clique Bait](./case-study-6-clique-bait) | Funnel Analysis, Campaign Attribution | Complete |
 | 7 | Balanced Tree | Hierarchical Data, Revenue Analysis | Upcoming |
 | 8 | Fresh Segments | Customer Segmentation, Interest Scoring | Upcoming |
 
