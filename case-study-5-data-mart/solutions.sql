@@ -1,295 +1,501 @@
 -- ================================
--- CASE STUDY #5: DATA MART
--- ================================
--- SECTION 1: DATA CLEANSING STEPS
+-- CASE STUDY #4: DATA BANK
 -- ================================
 
-DROP TABLE IF EXISTS clean_weekly_sales;
+-- ================================
+-- SECTION A: CUSTOMER NODES EXPLORATION
+-- ================================
 
-CREATE TABLE clean_weekly_sales AS
+-- A1: How many unique nodes are there on the Data Bank system?
+SELECT COUNT(DISTINCT node_id) AS unique_nodes
+FROM data_bank.customer_nodes;
+-- Insight: baseline scale of the network -- more nodes means more
+-- distributed storage and higher security.
+
+-- A2: What is the number of nodes per region?
 SELECT
-    TO_DATE(week_date, 'DD/MM/YY') AS week_date,
-    EXTRACT(WEEK FROM TO_DATE(week_date, 'DD/MM/YY')) AS week_number,
-    EXTRACT(MONTH FROM TO_DATE(week_date, 'DD/MM/YY')) AS month_number,
-    EXTRACT(YEAR FROM TO_DATE(week_date, 'DD/MM/YY')) AS calendar_year,
-    region,
-    platform,
-    segment,
-    CASE 
-        WHEN segment = 'null' THEN 'Unknown'
-        WHEN RIGHT(segment, 1) = '1' THEN 'Young Adults'
-        WHEN RIGHT(segment, 1) = '2' THEN 'Middle Aged'
-        WHEN RIGHT(segment, 1) IN ('3', '4') THEN 'Retirees'
-        ELSE 'Unknown'
-    END AS age_band,
-    CASE
-        WHEN segment = 'null' THEN 'Unknown'
-        WHEN LEFT(segment, 1) = 'C' THEN 'Couples'
-        WHEN LEFT(segment, 1) = 'F' THEN 'Families'
-        ELSE 'Unknown'
-    END AS demographic,
-    customer_type,
-    transactions,
-    sales,
-    ROUND(sales::NUMERIC / transactions, 2) AS avg_transaction
-FROM weekly_sales;
+    r.region_name,
+    COUNT(DISTINCT cn.node_id) AS node_count
+FROM data_bank.customer_nodes cn
+JOIN data_bank.regions r ON cn.region_id = r.region_id
+GROUP BY r.region_name;
+-- Insight: uneven node distribution across regions could create
+-- security/redundancy gaps -- informs infrastructure investment.
+
+-- A3: How many customers are allocated to each region?
+SELECT
+    r.region_name,
+    COUNT(DISTINCT cn.customer_id) AS customer_count
+FROM data_bank.customer_nodes cn
+JOIN data_bank.regions r ON cn.region_id = r.region_id
+GROUP BY r.region_name;
+-- Insight: high customer density in a region with few nodes is an
+-- operational risk worth flagging.
+
+-- A4: How many days on average are customers reallocated to a different node?
+SELECT
+    ROUND(AVG(end_date - start_date), 2) AS avg_reallocation_days
+FROM data_bank.customer_nodes
+WHERE end_date != '9999-12-31';
+-- Insight: 9999-12-31 is a sentinel date marking currently active
+-- assignments -- excluding it is necessary or the average is meaningless.
+
+-- A5: What is the median, 80th, and 95th percentile for reallocation days per region?
+SELECT
+    r.region_name,
+    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY end_date - start_date) AS median_days,
+    PERCENTILE_CONT(0.80) WITHIN GROUP (ORDER BY end_date - start_date) AS p80_days,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY end_date - start_date) AS p95_days
+FROM data_bank.customer_nodes cn
+JOIN data_bank.regions r ON cn.region_id = r.region_id
+WHERE end_date != '9999-12-31'
+GROUP BY r.region_name;
+-- Insight: percentiles reveal distribution shape averages hide -- a
+-- much higher p95 than median means some customers stay far longer
+-- than typical, worth investigating given reallocation is a security feature.
 
 -- ================================
--- SECTION 2: DATA EXPLORATION
+-- SECTION B: CUSTOMER TRANSACTIONS
 -- ================================
 
--- What day of the week is used for each week_date value?
-SELECT DISTINCT TO_CHAR(week_date, 'Day') AS day_of_week
-FROM clean_weekly_sales;
+-- B1: What is the unique count and total amount for each transaction type?
+SELECT
+    txn_type,
+    COUNT(*) AS transaction_count,
+    SUM(txn_amount) AS total_amount
+FROM data_bank.customer_transactions
+GROUP BY txn_type;
+-- Insight: deposits should dominate in a healthy platform -- if
+-- withdrawals/purchases outpace deposits, balances are drawing down.
 
--- What range of week numbers are missing from the dataset?
-WITH all_weeks AS (
-    SELECT GENERATE_SERIES(1, 52) AS week_number
+-- B2: What is the average total historical deposit counts and amounts for all customers?
+WITH customer_deposits AS (
+    SELECT
+        customer_id,
+        COUNT(*) AS deposit_count,
+        SUM(txn_amount) AS deposit_amount
+    FROM data_bank.customer_transactions
+    WHERE txn_type = 'deposit'
+    GROUP BY customer_id
 )
-SELECT aw.week_number
-FROM all_weeks aw
-LEFT JOIN clean_weekly_sales cws ON aw.week_number = cws.week_number
-WHERE cws.week_number IS NULL;
+SELECT
+    ROUND(AVG(deposit_count), 2) AS avg_deposit_count,
+    ROUND(AVG(deposit_amount), 2) AS avg_deposit_amount
+FROM customer_deposits;
+-- Insight: two-step aggregation (per customer, then average across
+-- customers) -- doing it in one step gives a different, incorrect number.
 
--- Total transactions per year
-SELECT 
-    calendar_year,
-    SUM(transactions) AS total_transactions
-FROM clean_weekly_sales
-GROUP BY calendar_year
-ORDER BY calendar_year;
-
--- Total sales by region and month
-SELECT 
-    region,
-    month_number,
-    SUM(sales) AS total_sales
-FROM clean_weekly_sales
-GROUP BY region, month_number
-ORDER BY region, month_number;
-
--- Total transactions per platform
-SELECT 
-    platform,
-    SUM(transactions) AS total_transactions
-FROM clean_weekly_sales
-GROUP BY platform
-ORDER BY total_transactions DESC;
-
--- Retail vs Shopify % of sales per month
-WITH monthly_platform AS (
-    SELECT 
-        calendar_year,
-        month_number,
-        platform,
-        SUM(sales) AS monthly_sales
-    FROM clean_weekly_sales
-    GROUP BY calendar_year, month_number, platform
+-- B3: For each month, how many customers make more than 1 deposit AND either 1 purchase OR 1 withdrawal?
+WITH monthly_activity AS (
+    SELECT
+        customer_id,
+        DATE_PART('month', txn_date) AS month,
+        SUM(CASE WHEN txn_type = 'deposit' THEN 1 ELSE 0 END) AS deposit_count,
+        SUM(CASE WHEN txn_type = 'purchase' THEN 1 ELSE 0 END) AS purchase_count,
+        SUM(CASE WHEN txn_type = 'withdrawal' THEN 1 ELSE 0 END) AS withdrawal_count
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id, DATE_PART('month', txn_date)
 )
-SELECT 
-    calendar_year,
-    month_number,
-    ROUND(100.0 * SUM(CASE WHEN platform = 'Retail' THEN monthly_sales ELSE 0 END) 
-        / SUM(monthly_sales), 2) AS retail_pct,
-    ROUND(100.0 * SUM(CASE WHEN platform = 'Shopify' THEN monthly_sales ELSE 0 END) 
-        / SUM(monthly_sales), 2) AS shopify_pct
-FROM monthly_platform
-GROUP BY calendar_year, month_number
-ORDER BY calendar_year, month_number;
+SELECT
+    month,
+    COUNT(DISTINCT customer_id) AS qualifying_customers
+FROM monthly_activity
+WHERE deposit_count > 1
+AND (purchase_count >= 1 OR withdrawal_count >= 1)
+GROUP BY month
+ORDER BY month;
+-- Insight: conditional aggregation via CASE WHEN inside SUM handles
+-- multi-condition filtering in a single pass, cleaner than subqueries.
 
--- Demographic sales % per year
-WITH demo_sales AS (
-    SELECT 
-        calendar_year,
-        demographic,
-        SUM(sales) AS total_sales
-    FROM clean_weekly_sales
-    GROUP BY calendar_year, demographic
+-- B4: What is the closing balance for each customer at the end of each month?
+WITH monthly_net AS (
+    SELECT
+        customer_id,
+        DATE_TRUNC('month', txn_date) AS month,
+        SUM(CASE
+            WHEN txn_type = 'deposit' THEN txn_amount
+            ELSE -txn_amount
+        END) AS net_amount
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id, DATE_TRUNC('month', txn_date)
 )
-SELECT 
-    calendar_year,
-    demographic,
-    ROUND(100.0 * total_sales / SUM(total_sales) OVER (PARTITION BY calendar_year), 2) AS pct_of_year
-FROM demo_sales
-ORDER BY calendar_year, pct_of_year DESC;
+SELECT
+    customer_id,
+    month,
+    SUM(net_amount) OVER (
+        PARTITION BY customer_id
+        ORDER BY month
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS closing_balance
+FROM monthly_net
+ORDER BY customer_id, month;
+-- Insight: DATE_TRUNC preserves year context -- EXTRACT(MONTH) alone
+-- would merge Jan 2020 and Jan 2021 into the same group.
 
--- Top contributing age_band and demographic for Retail
-SELECT 
-    age_band,
-    demographic,
-    SUM(sales) AS total_sales
-FROM clean_weekly_sales
-WHERE platform = 'Retail'
-GROUP BY age_band, demographic
-ORDER BY total_sales DESC;
-
--- Correct average transaction size: SUM(sales)/SUM(transactions) vs AVG(avg_transaction)
-SELECT 
-    calendar_year,
-    ROUND(AVG(avg_transaction), 2) AS naive_avg_transaction,
-    ROUND(SUM(sales)::NUMERIC / SUM(transactions), 2) AS correct_avg_transaction
-FROM clean_weekly_sales
-GROUP BY calendar_year
-ORDER BY calendar_year;
+-- B5: What is the percentage of customers who increase their closing balance by more than 5%?
+WITH signed_txns AS (
+    SELECT
+        customer_id,
+        DATE_TRUNC('month', txn_date) AS txn_month,
+        SUM(
+            CASE
+                WHEN txn_type = 'deposit' THEN txn_amount
+                ELSE -txn_amount
+            END
+        ) AS monthly_net
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id, DATE_TRUNC('month', txn_date)
+),
+balances AS (
+    SELECT
+        customer_id,
+        txn_month,
+        SUM(monthly_net) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_month
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS closing_balance
+    FROM signed_txns
+),
+customer_range AS (
+    SELECT
+        customer_id,
+        FIRST_VALUE(closing_balance) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_month
+        ) AS first_balance,
+        LAST_VALUE(closing_balance) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_month
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) AS last_balance
+    FROM balances
+)
+SELECT
+    ROUND(
+        100.0 * COUNT(DISTINCT customer_id) FILTER (
+            WHERE first_balance > 0
+            AND (last_balance - first_balance) / first_balance > 0.05
+        ) / COUNT(DISTINCT customer_id), 2
+    ) AS pct_customers_increased
+FROM customer_range;
+-- Insight: the first_balance > 0 guard prevents dividing by a negative
+-- or zero balance, which would produce mathematically wrong percentages.
 
 -- ================================
--- SECTION 3: BEFORE & AFTER ANALYSIS
+-- SECTION C: DATA ALLOCATION CHALLENGE
 -- ================================
--- Baseline event: 2020-06-15 (week 25), packaging change
 
--- 4-week window
-WITH tagged AS (
-    SELECT 
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '4 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '4 weeks'
+-- C1: Running customer balance per transaction.
+WITH running_balances AS (
+    SELECT
+        customer_id,
+        txn_date,
+        SUM(
+            CASE
+                WHEN txn_type = 'deposit' THEN txn_amount
+                ELSE -txn_amount
+            END
+        ) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_date
+        ) AS running_balance
+    FROM data_bank.customer_transactions
 )
-SELECT 
-    SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END) AS before_sales,
-    SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) AS after_sales,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged;
+SELECT * FROM running_balances
+ORDER BY customer_id, txn_date;
+-- Insight: unlike B4's monthly aggregation, this applies the window
+-- function to every individual transaction -- a real-time view.
 
--- 12-week window
-WITH tagged AS (
-    SELECT 
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '12 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '12 weeks'
+-- C2: Closing balance at the end of each month.
+WITH monthly_net AS (
+    SELECT
+        customer_id,
+        DATE_TRUNC('month', txn_date) AS month,
+        SUM(CASE
+            WHEN txn_type = 'deposit' THEN txn_amount
+            ELSE -txn_amount
+        END) AS net_amount
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id, DATE_TRUNC('month', txn_date)
 )
-SELECT 
-    SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END) AS before_sales,
-    SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) AS after_sales,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged;
+SELECT
+    customer_id,
+    month,
+    SUM(net_amount) OVER (
+        PARTITION BY customer_id
+        ORDER BY month
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS closing_balance
+FROM monthly_net
+ORDER BY customer_id, month;
+-- Insight: same pattern as B4, reused here as the anchor figure the
+-- allocation options below build from.
 
--- Year-over-year comparison for the same 12-week window (rule out seasonality)
-WITH tagged AS (
-    SELECT 
-        calendar_year,
-        CASE WHEN week_date < MAKE_DATE(calendar_year, 6, 15) THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN MAKE_DATE(calendar_year, 6, 15) - INTERVAL '12 weeks' 
-        AND MAKE_DATE(calendar_year, 6, 15) + INTERVAL '12 weeks'
+-- C3: Minimum, average, and maximum running balance per customer.
+WITH running_balances AS (
+    SELECT
+        customer_id,
+        txn_date,
+        SUM(
+            CASE
+                WHEN txn_type = 'deposit' THEN txn_amount
+                ELSE -txn_amount
+            END
+        ) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_date
+        ) AS running_balance
+    FROM data_bank.customer_transactions
 )
-SELECT 
-    calendar_year,
-    SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END) AS before_sales,
-    SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) AS after_sales,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged
-GROUP BY calendar_year
-ORDER BY calendar_year;
+SELECT
+    customer_id,
+    MIN(running_balance) AS min_balance,
+    AVG(running_balance) AS avg_balance,
+    MAX(running_balance) AS max_balance
+FROM running_balances
+GROUP BY customer_id
+ORDER BY customer_id;
+-- Insight: high spread between min and max indicates volatile account
+-- behaviour -- a provisioning challenge under the real-time model (C6).
+
+-- C4: Allocation Option 1 -- based on previous month's closing balance.
+WITH monthly_net AS (
+    SELECT
+        customer_id,
+        DATE_TRUNC('month', txn_date) AS month,
+        SUM(CASE
+            WHEN txn_type = 'deposit' THEN txn_amount
+            ELSE -txn_amount
+        END) AS net_amount
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id, DATE_TRUNC('month', txn_date)
+),
+closing_balances AS (
+    SELECT
+        customer_id,
+        month,
+        SUM(net_amount) OVER (
+            PARTITION BY customer_id
+            ORDER BY month
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS closing_balance
+    FROM monthly_net
+),
+previous_month_balances AS (
+    SELECT
+        customer_id,
+        month,
+        GREATEST(
+            LAG(closing_balance) OVER (
+                PARTITION BY customer_id
+                ORDER BY month
+            ), 0
+        ) AS data_allocated
+    FROM closing_balances
+)
+SELECT
+    month,
+    SUM(data_allocated) AS total_data_allocated
+FROM previous_month_balances
+GROUP BY month
+ORDER BY month;
+-- Insight: LAG() looks one row back per customer, giving last month's
+-- balance as this month's allocation. GREATEST(...,0) floors negative
+-- balances since negative storage is meaningless. Stable but always one
+-- month behind actual balances.
+
+-- C5: Allocation Option 2 -- based on 30-day average balance.
+WITH running_balances AS (
+    SELECT
+        customer_id,
+        txn_date,
+        SUM(
+            CASE
+                WHEN txn_type = 'deposit' THEN txn_amount
+                ELSE -txn_amount
+            END
+        ) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_date
+        ) AS running_balance
+    FROM data_bank.customer_transactions
+),
+option2_allocation AS (
+    SELECT
+        customer_id,
+        txn_date,
+        GREATEST(
+            AVG(running_balance) OVER (
+                PARTITION BY customer_id
+                ORDER BY txn_date
+                RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW
+            ), 0
+        ) AS data_allocated
+    FROM running_balances
+)
+SELECT
+    DATE_TRUNC('month', txn_date) AS month,
+    SUM(data_allocated) AS total_data_allocated
+FROM option2_allocation
+GROUP BY DATE_TRUNC('month', txn_date)
+ORDER BY month;
+-- Insight: RANGE BETWEEN INTERVAL is date-based, not row-based -- looks
+-- back 30 calendar days, not 30 rows. Smooths volatility better than
+-- Options 1 or 3.
+
+-- C6: Allocation Option 3 -- real-time allocation.
+WITH running_balances AS (
+    SELECT
+        customer_id,
+        txn_date,
+        SUM(
+            CASE
+                WHEN txn_type = 'deposit' THEN txn_amount
+                ELSE -txn_amount
+            END
+        ) OVER (
+            PARTITION BY customer_id
+            ORDER BY txn_date
+        ) AS running_balance
+    FROM data_bank.customer_transactions
+)
+SELECT
+    DATE_TRUNC('month', txn_date) AS month,
+    SUM(GREATEST(running_balance, 0)) AS total_data_allocated
+FROM running_balances
+GROUP BY DATE_TRUNC('month', txn_date)
+ORDER BY month;
+-- Insight: reacts instantly to every transaction -- most responsive but
+-- also the most volatile, requiring the largest provisioning buffer.
 
 -- ================================
--- SECTION 4: BONUS - IMPACT BY BUSINESS AREA
+-- SECTION D: INTEREST-BASED ALLOCATION
 -- ================================
--- Pattern repeated across region, platform, age_band, demographic, customer_type
 
--- Region
-WITH tagged AS (
-    SELECT 
-        region,
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '12 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '12 weeks'
+-- D1: Simple daily interest (no compounding), 6% annual rate.
+WITH customer_dates AS (
+    SELECT
+        customer_id,
+        MIN(txn_date) AS first_date,
+        MAX(txn_date) AS last_date
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id
+),
+customer_series AS (
+    SELECT
+        cd.customer_id,
+        GENERATE_SERIES(cd.first_date, cd.last_date, INTERVAL '1 day')::DATE AS day
+    FROM customer_dates cd
+),
+daily_balances AS (
+    SELECT
+        cs.customer_id,
+        cs.day,
+        COALESCE(
+            CASE
+                WHEN ct.txn_type = 'deposit' THEN ct.txn_amount
+                ELSE -ct.txn_amount
+            END, 0
+        ) AS signed_amount
+    FROM customer_series cs
+    LEFT JOIN data_bank.customer_transactions ct
+        ON cs.customer_id = ct.customer_id
+        AND cs.day = ct.txn_date
+),
+running_daily_balance AS (
+    SELECT
+        customer_id,
+        day,
+        SUM(signed_amount) OVER (
+            PARTITION BY customer_id
+            ORDER BY day
+        ) AS running_balance
+    FROM daily_balances
+),
+daily_interest AS (
+    SELECT
+        customer_id,
+        day,
+        running_balance,
+        GREATEST(running_balance, 0) * (0.06 / 365.0) AS daily_interest_earned
+    FROM running_daily_balance
 )
-SELECT 
-    region,
-    SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END) AS before_sales,
-    SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) AS after_sales,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged
-GROUP BY region
-ORDER BY pct_change ASC;
+SELECT
+    DATE_TRUNC('month', day) AS month,
+    ROUND(SUM(daily_interest_earned), 2) AS total_simple_interest,
+    ROUND(SUM(GREATEST(running_balance, 0) + daily_interest_earned), 2) AS total_data_required
+FROM daily_interest
+GROUP BY DATE_TRUNC('month', day)
+ORDER BY month;
+-- Insight: GENERATE_SERIES creates a complete daily date spine per
+-- customer; LEFT JOIN brings in transaction amounts where they exist,
+-- COALESCE fills gap days with 0. Without this, days with no
+-- transactions would be invisible and the running balance would jump
+-- incorrectly.
 
--- Platform
-WITH tagged AS (
-    SELECT 
-        platform,
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '12 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '12 weeks'
+-- D2: Daily compounding interest, 6% annual rate.
+WITH customer_dates AS (
+    SELECT
+        customer_id,
+        MIN(txn_date) AS first_date,
+        MAX(txn_date) AS last_date
+    FROM data_bank.customer_transactions
+    GROUP BY customer_id
+),
+customer_series AS (
+    SELECT
+        cd.customer_id,
+        GENERATE_SERIES(cd.first_date, cd.last_date, INTERVAL '1 day')::DATE AS day
+    FROM customer_dates cd
+),
+daily_balances AS (
+    SELECT
+        cs.customer_id,
+        cs.day,
+        COALESCE(
+            CASE
+                WHEN ct.txn_type = 'deposit' THEN ct.txn_amount
+                ELSE -ct.txn_amount
+            END, 0
+        ) AS signed_amount
+    FROM customer_series cs
+    LEFT JOIN data_bank.customer_transactions ct
+        ON cs.customer_id = ct.customer_id
+        AND cs.day = ct.txn_date
+),
+running_daily_balance AS (
+    SELECT
+        customer_id,
+        day,
+        SUM(signed_amount) OVER (
+            PARTITION BY customer_id
+            ORDER BY day
+        ) AS running_balance
+    FROM daily_balances
+),
+compounded_interest AS (
+    SELECT
+        customer_id,
+        day,
+        running_balance,
+        GREATEST(running_balance, 0) *
+            POWER(1 + 0.06 / 365.0,
+                ROW_NUMBER() OVER (
+                    PARTITION BY customer_id
+                    ORDER BY day
+                )
+            ) - GREATEST(running_balance, 0) AS compound_interest_earned
+    FROM running_daily_balance
 )
-SELECT 
-    platform,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged
-GROUP BY platform
-ORDER BY pct_change ASC;
-
--- Age Band
-WITH tagged AS (
-    SELECT 
-        age_band,
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '12 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '12 weeks'
-)
-SELECT 
-    age_band,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged
-GROUP BY age_band
-ORDER BY pct_change ASC;
-
--- Demographic
-WITH tagged AS (
-    SELECT 
-        demographic,
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '12 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '12 weeks'
-)
-SELECT 
-    demographic,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged
-GROUP BY demographic
-ORDER BY pct_change ASC;
-
--- Customer Type
-WITH tagged AS (
-    SELECT 
-        customer_type,
-        CASE WHEN week_date < '2020-06-15' THEN 'Before' ELSE 'After' END AS period,
-        sales
-    FROM clean_weekly_sales
-    WHERE week_date BETWEEN '2020-06-15'::DATE - INTERVAL '12 weeks' 
-        AND '2020-06-15'::DATE + INTERVAL '12 weeks'
-)
-SELECT 
-    customer_type,
-    ROUND(100.0 * (SUM(CASE WHEN period = 'After' THEN sales ELSE 0 END) 
-        - SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END))
-        / SUM(CASE WHEN period = 'Before' THEN sales ELSE 0 END), 2) AS pct_change
-FROM tagged
-GROUP BY customer_type
-ORDER BY pct_change ASC;
+SELECT
+    DATE_TRUNC('month', day) AS month,
+    ROUND(SUM(compound_interest_earned), 2) AS total_compound_interest,
+    ROUND(SUM(GREATEST(running_balance, 0) + compound_interest_earned), 2) AS total_data_required
+FROM compounded_interest
+GROUP BY DATE_TRUNC('month', day)
+ORDER BY month;
+-- Insight: POWER() applies growth exponentially -- each day's interest
+-- builds on all previous days' interest. ROW_NUMBER() provides the
+-- exponent (days elapsed). The gap between simple and compound results
+-- grows over time -- the figure Data Bank needs before choosing a model.
