@@ -1,16 +1,19 @@
 -- ================================
 -- CASE STUDY #6: CLIQUE BAIT
 -- ================================
--- SECTION 2: DIGITAL ANALYSIS
+
+-- ================================
+-- SECTION A: DIGITAL ANALYSIS
 -- ================================
 
--- How many users are there?
+-- A1: How many users are there?
 SELECT COUNT(DISTINCT user_id) AS total_users
 FROM clique_bait.users;
+-- Insight: 500 unique users -- the denominator for every per-user metric.
 
--- How many cookies does each user have on average?
+-- A2: How many cookies does each user have on average?
 WITH cookie_count AS (
-    SELECT 
+    SELECT
         user_id,
         COUNT(cookie_id) AS total_cookies
     FROM clique_bait.users
@@ -18,25 +21,31 @@ WITH cookie_count AS (
 )
 SELECT ROUND(AVG(total_cookies), 2) AS avg_cookies_per_user
 FROM cookie_count;
+-- Insight: users return across multiple devices/sessions -- device-level
+-- analysis must roll up to user_id, not cookie_id, to avoid double-counting.
 
--- What is the unique number of visits by all users per month?
-SELECT 
+-- A3: What is the unique number of visits by all users per month?
+SELECT
     EXTRACT(MONTH FROM event_time) AS month,
     COUNT(DISTINCT visit_id) AS unique_visits
 FROM clique_bait.events
 GROUP BY EXTRACT(MONTH FROM event_time)
 ORDER BY month;
+-- Insight: traffic peaks sharply mid-window then collapses -- likely a
+-- data collection cutoff rather than genuine demand decline.
 
--- What is the number of events for each event type?
-SELECT 
+-- A4: What is the number of events for each event type?
+SELECT
     ei.event_name,
     COUNT(*) AS event_count
 FROM clique_bait.events e
 JOIN clique_bait.event_identifier ei ON e.event_type = ei.event_type
 GROUP BY ei.event_name
 ORDER BY event_count DESC;
+-- Insight: the bigger drop-off is post-cart (cart-to-purchase), not
+-- pre-cart (view-to-cart) -- tells the business where to focus retention.
 
--- What is the percentage of visits which have a purchase event?
+-- A5: What is the percentage of visits which have a purchase event?
 WITH purchase_visits AS (
     SELECT COUNT(DISTINCT visit_id) AS purchase_count
     FROM clique_bait.events
@@ -46,24 +55,28 @@ all_visits AS (
     SELECT COUNT(DISTINCT visit_id) AS total_count
     FROM clique_bait.events
 )
-SELECT 
+SELECT
     ROUND(100.0 * purchase_count / total_count, 2) AS pct_purchase_visits
 FROM purchase_visits, all_visits;
+-- Insight: high for e-commerce -- suggests traffic quality is strong,
+-- visitors are largely high-intent.
 
--- What is the percentage of visits which view the checkout page but do not have a purchase event?
-SELECT 
-    ROUND(100.0 * COUNT(DISTINCT visit_id) / 
+-- A6: What is the percentage of visits which view the checkout page but do not have a purchase event?
+SELECT
+    ROUND(100.0 * COUNT(DISTINCT visit_id) /
         (SELECT COUNT(DISTINCT visit_id) FROM clique_bait.events), 2) AS pct_checkout_no_purchase
 FROM clique_bait.events
 WHERE page_id = 12
 AND visit_id NOT IN (
-    SELECT DISTINCT visit_id 
-    FROM clique_bait.events 
+    SELECT DISTINCT visit_id
+    FROM clique_bait.events
     WHERE event_type = 3
 );
+-- Insight: a meaningful chunk of lost conversions happen at checkout --
+-- a concrete target for a UX or payment-friction fix.
 
--- What are the top 3 pages by number of views?
-SELECT 
+-- A7: What are the top 3 pages by number of views?
+SELECT
     ph.page_name,
     COUNT(*) AS view_count
 FROM clique_bait.events e
@@ -72,9 +85,11 @@ WHERE e.event_type = 1
 GROUP BY ph.page_name
 ORDER BY view_count DESC
 LIMIT 3;
+-- Insight: "All Products" outdraws the Home Page -- most users bypass
+-- the homepage narrative and go straight to browsing.
 
--- What is the number of views and cart adds for each product category?
-SELECT 
+-- A8: What is the number of views and cart adds for each product category?
+SELECT
     ph.product_category,
     SUM(CASE WHEN e.event_type = 1 THEN 1 ELSE 0 END) AS views,
     SUM(CASE WHEN e.event_type = 2 THEN 1 ELSE 0 END) AS cart_adds
@@ -83,40 +98,47 @@ JOIN clique_bait.page_hierarchy ph ON e.page_id = ph.page_id
 WHERE ph.product_category IS NOT NULL
 GROUP BY ph.product_category
 ORDER BY views DESC;
+-- Insight: all categories convert views to cart adds at a near-identical
+-- rate -- category choice barely moves conversion, the real lever is
+-- total traffic volume per category.
 
--- What are the top 3 products by purchases?
-SELECT 
+-- A9: What are the top 3 products by purchases?
+SELECT
     ph.page_name AS product_name,
     COUNT(*) AS purchases
 FROM clique_bait.events e
 JOIN clique_bait.page_hierarchy ph ON e.page_id = ph.page_id
 WHERE e.event_type = 2
 AND e.visit_id IN (
-    SELECT DISTINCT visit_id 
-    FROM clique_bait.events 
+    SELECT DISTINCT visit_id
+    FROM clique_bait.events
     WHERE event_type = 3
 )
 AND ph.product_id IS NOT NULL
 GROUP BY ph.page_name
 ORDER BY purchases DESC
 LIMIT 3;
+-- Insight: top 3 products are within 5% of each other -- no single
+-- breakout hero product, demand is evenly spread.
 
 -- ================================
--- SECTION 3: PRODUCT FUNNEL ANALYSIS
+-- SECTION B: PRODUCT FUNNEL ANALYSIS
 -- ================================
+-- Setup: two derived tables pre-aggregate views, cart adds, abandons,
+-- and purchases at the product and category level. No Insight line --
+-- these are structural steps, not standalone questions.
 
--- Product level funnel table
 CREATE TABLE clique_bait.product_funnel AS
 WITH product_stats AS (
-    SELECT 
+    SELECT
         ph.page_name AS product_name,
         SUM(CASE WHEN e.event_type = 1 THEN 1 ELSE 0 END) AS views,
         SUM(CASE WHEN e.event_type = 2 THEN 1 ELSE 0 END) AS cart_adds,
-        SUM(CASE WHEN e.event_type = 2 
+        SUM(CASE WHEN e.event_type = 2
             AND e.visit_id NOT IN (
                 SELECT DISTINCT visit_id FROM clique_bait.events WHERE event_type = 3
             ) THEN 1 ELSE 0 END) AS abandoned,
-        SUM(CASE WHEN e.event_type = 2 
+        SUM(CASE WHEN e.event_type = 2
             AND e.visit_id IN (
                 SELECT DISTINCT visit_id FROM clique_bait.events WHERE event_type = 3
             ) THEN 1 ELSE 0 END) AS purchases
@@ -127,18 +149,17 @@ WITH product_stats AS (
 )
 SELECT * FROM product_stats;
 
--- Category level funnel table
 CREATE TABLE clique_bait.category_funnel AS
 WITH category_stats AS (
-    SELECT 
+    SELECT
         ph.product_category,
         SUM(CASE WHEN e.event_type = 1 THEN 1 ELSE 0 END) AS views,
         SUM(CASE WHEN e.event_type = 2 THEN 1 ELSE 0 END) AS cart_adds,
-        SUM(CASE WHEN e.event_type = 2 
+        SUM(CASE WHEN e.event_type = 2
             AND e.visit_id NOT IN (
                 SELECT DISTINCT visit_id FROM clique_bait.events WHERE event_type = 3
             ) THEN 1 ELSE 0 END) AS abandoned,
-        SUM(CASE WHEN e.event_type = 2 
+        SUM(CASE WHEN e.event_type = 2
             AND e.visit_id IN (
                 SELECT DISTINCT visit_id FROM clique_bait.events WHERE event_type = 3
             ) THEN 1 ELSE 0 END) AS purchases
@@ -149,32 +170,56 @@ WITH category_stats AS (
 )
 SELECT * FROM category_stats;
 
+-- B1: Which product has the most views?
 SELECT product_name, views FROM clique_bait.product_funnel ORDER BY views DESC LIMIT 1;
-SELECT product_name, cart_adds FROM clique_bait.product_funnel ORDER BY cart_adds DESC LIMIT 1;
-SELECT product_name, purchases FROM clique_bait.product_funnel ORDER BY purchases DESC LIMIT 1;
+-- Insight: leads on raw views despite finishing 2nd in purchases -- high
+-- browse interest doesn't automatically translate to top purchase volume.
 
--- Q5: Highest view to purchase percentage
-SELECT 
+-- B2: Which product has the most cart adds?
+SELECT product_name, cart_adds FROM clique_bait.product_funnel ORDER BY cart_adds DESC LIMIT 1;
+-- Insight: also leads purchases -- the most "decisive" product,
+-- converting interest into action more reliably than others.
+
+-- B3: Which product has the most purchases?
+SELECT product_name, purchases FROM clique_bait.product_funnel ORDER BY purchases DESC LIMIT 1;
+-- Insight: strongest end-to-end performer -- high views, high cart
+-- adds, high purchases.
+
+-- B4: Which product has the highest view-to-purchase percentage?
+SELECT
     product_name,
     ROUND(100.0 * purchases / views, 2) AS view_to_purchase_pct
 FROM clique_bait.product_funnel
 ORDER BY view_to_purchase_pct DESC
 LIMIT 1;
+-- Insight: nearly 1 in 2 viewers end up buying -- the clearest candidate
+-- for featured placement or ad spend.
 
--- Q6: Average conversion rate view to cart add
-SELECT 
+-- B5: What is the average conversion rate from view to cart add?
+SELECT
     ROUND(AVG(100.0 * cart_adds / views), 2) AS avg_view_to_cart_pct
 FROM clique_bait.product_funnel;
+-- Insight: the first funnel stage is healthy across the catalogue, not
+-- just for top performers.
 
--- Q7: Average conversion rate cart add to purchase
-SELECT 
+-- B6: What is the average conversion rate from cart add to purchase?
+SELECT
     ROUND(AVG(100.0 * purchases / cart_adds), 2) AS avg_cart_to_purchase_pct
 FROM clique_bait.product_funnel;
+-- Insight: higher than the view-to-cart stage -- once in the cart, a
+-- product is fairly likely to be bought. The bigger opportunity is
+-- getting more viewers to add to cart, not fixing cart abandonment.
 
--- section C 
+-- ================================
+-- SECTION C: CAMPAIGN & MARKETING ANALYSIS
+-- ================================
+-- Setup: joins visit-level activity to campaign_identifier via a
+-- date-range JOIN, since there's no direct foreign key linking visits
+-- to campaigns.
+
 CREATE TABLE clique_bait.campaign_analysis AS
 WITH visit_summary AS (
-    SELECT 
+    SELECT
         u.user_id,
         e.visit_id,
         MIN(e.event_time) AS visit_start_time,
@@ -183,14 +228,14 @@ WITH visit_summary AS (
         MAX(CASE WHEN e.event_type = 3 THEN 1 ELSE 0 END) AS purchase,
         SUM(CASE WHEN e.event_type = 4 THEN 1 ELSE 0 END) AS impression,
         SUM(CASE WHEN e.event_type = 5 THEN 1 ELSE 0 END) AS click,
-        STRING_AGG(ph.page_name, ', ' ORDER BY e.sequence_number) 
+        STRING_AGG(ph.page_name, ', ' ORDER BY e.sequence_number)
             FILTER (WHERE e.event_type = 2) AS cart_products
     FROM clique_bait.events e
     JOIN clique_bait.users u ON e.cookie_id = u.cookie_id
     JOIN clique_bait.page_hierarchy ph ON e.page_id = ph.page_id
     GROUP BY u.user_id, e.visit_id
 )
-SELECT 
+SELECT
     vs.user_id,
     vs.visit_id,
     vs.visit_start_time,
@@ -202,12 +247,12 @@ SELECT
     vs.click,
     vs.cart_products
 FROM visit_summary vs
-LEFT JOIN clique_bait.campaign_identifier ci 
+LEFT JOIN clique_bait.campaign_identifier ci
     ON vs.visit_start_time BETWEEN ci.start_date AND ci.end_date
 ORDER BY vs.user_id, vs.visit_start_time;
 
--- Insight 1: Purchase rate by campaign
-SELECT 
+-- C1: What is the purchase rate by campaign?
+SELECT
     COALESCE(campaign_name, 'No Campaign') AS campaign,
     COUNT(visit_id) AS total_visits,
     SUM(purchase) AS purchases,
@@ -215,19 +260,23 @@ SELECT
 FROM clique_bait.campaign_analysis
 GROUP BY campaign_name
 ORDER BY purchase_rate DESC;
+-- Insight: "No Campaign" converts better than any active discount
+-- campaign -- campaigns are driving volume, not conversion lift.
 
--- Insight 2: Impact of ad impression on purchase rate
-SELECT 
+-- C2: What is the impact of ad impressions on purchase rate?
+SELECT
     CASE WHEN impression > 0 THEN 'Saw Impression' ELSE 'No Impression' END AS impression_group,
     COUNT(visit_id) AS total_visits,
     SUM(purchase) AS purchases,
     ROUND(100.0 * SUM(purchase) / COUNT(visit_id), 2) AS purchase_rate
 FROM clique_bait.campaign_analysis
 GROUP BY impression_group;
+-- Insight: seeing an ad impression more than doubles purchase rate --
+-- the strongest single lever found in the dataset.
 
--- Insight 3: Impact of clicking ad vs just seeing it
-SELECT 
-    CASE 
+-- C3: What is the impact of clicking an ad vs. only seeing it?
+SELECT
+    CASE
         WHEN click > 0 THEN 'Clicked Ad'
         WHEN impression > 0 THEN 'Saw Ad Only'
         ELSE 'No Ad'
@@ -238,20 +287,27 @@ SELECT
 FROM clique_bait.campaign_analysis
 GROUP BY engagement_group
 ORDER BY purchase_rate DESC;
+-- Insight: a clear engagement gradient -- click > impression only > no
+-- ad, each step roughly doubling conversion probability.
 
--- Insight 4: Average page views and cart adds by purchase outcome
-SELECT 
+-- C4: What is the average page views and cart adds by purchase outcome?
+SELECT
     CASE WHEN purchase = 1 THEN 'Purchased' ELSE 'Did Not Purchase' END AS outcome,
     ROUND(AVG(page_views), 2) AS avg_page_views,
     ROUND(AVG(cart_adds), 2) AS avg_cart_adds
 FROM clique_bait.campaign_analysis
 GROUP BY outcome;
+-- Insight: buyers browse over twice as many pages and add far more
+-- items to cart than non-buyers -- session depth is a strong real-time
+-- conversion signal.
 
--- Insight 5: Most visited campaign period by unique users
-SELECT 
+-- C5: Which campaign has the most unique users, and what's its purchase rate?
+SELECT
     COALESCE(campaign_name, 'No Campaign') AS campaign,
     COUNT(DISTINCT user_id) AS unique_users,
     ROUND(100.0 * SUM(purchase) / COUNT(visit_id), 2) AS purchase_rate
 FROM clique_bait.campaign_analysis
 GROUP BY campaign_name
 ORDER BY unique_users DESC;
+-- Insight: the highest-reach campaign doesn't convert best -- its real
+-- value is top-of-funnel reach, not conversion efficiency.
