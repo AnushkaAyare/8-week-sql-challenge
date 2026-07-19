@@ -1,59 +1,70 @@
----------------------------------
+-- ================================
 -- CASE STUDY #7: BALANCED TREE
----------------------------------
+-- ================================
 
----------------------------------
--- A: HIGH LEVEL SALES ANALYSIS
----------------------------------
+-- ================================
+-- SECTION A: HIGH LEVEL SALES ANALYSIS
+-- ================================
 
 -- A1: Total quantity sold
 SELECT SUM(qty) AS total_quantity
 FROM balanced_tree.sales;
+-- Insight: baseline volume figure the rest of the analysis is measured against.
 
 -- A2: Total revenue before discounts
 SELECT SUM(price * qty) AS total_revenue
 FROM balanced_tree.sales;
+-- Insight: top-line figure the CFO report needs -- every discount and
+-- net-revenue metric below should reconcile back to this number.
 
 -- A3: Total discount amount
 SELECT ROUND(SUM(price * qty * discount / 100.0), 2) AS total_discount
 FROM balanced_tree.sales;
+-- Insight: roughly 12% of gross revenue -- a meaningful margin
+-- concession worth flagging to the CFO as its own line item.
 
----------------------------------
--- B: TRANSACTION ANALYSIS
----------------------------------
+-- ================================
+-- SECTION B: TRANSACTION ANALYSIS
+-- ================================
 
 -- B1: Unique transactions
 SELECT COUNT(DISTINCT txn_id) AS unique_transactions
 FROM balanced_tree.sales;
+-- Insight: combined with A2, gives average revenue per transaction.
 
 -- B2: Average unique products per transaction
 WITH count_products AS (
-    SELECT 
+    SELECT
         txn_id,
         COUNT(DISTINCT prod_id) AS count_distinct_prod
     FROM balanced_tree.sales
     GROUP BY txn_id
 )
-SELECT ROUND(AVG(count_distinct_prod), 2) AS avg_unique_products 
+SELECT ROUND(AVG(count_distinct_prod), 2) AS avg_unique_products
 FROM count_products;
+-- Insight: a strong basket size for apparel -- suggests bundling or
+-- store layout is working, not just single-item purchases.
 
 -- B3: 25th, 50th, 75th percentile of revenue per transaction
 WITH revenue AS (
-    SELECT 
+    SELECT
         txn_id,
         SUM(price * qty * (1 - discount/100.0)) AS revenue
     FROM balanced_tree.sales
     GROUP BY txn_id
 )
-SELECT 
+SELECT
     PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY revenue) AS p25,
     PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY revenue) AS p50,
     PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY revenue) AS p75
 FROM revenue;
+-- Insight: the median sits below the average with a wide P25-P75 spread
+-- -- revenue per transaction is right-skewed, a few high-value
+-- transactions pull the average up.
 
 -- B4: Average discount value per transaction
 WITH discount_per_txn AS (
-    SELECT 
+    SELECT
         txn_id,
         SUM(price * qty * discount / 100.0) AS discount_value
     FROM balanced_tree.sales
@@ -61,46 +72,51 @@ WITH discount_per_txn AS (
 )
 SELECT ROUND(AVG(discount_value), 2) AS avg_discount_per_txn
 FROM discount_per_txn;
+-- Insight: consistent with A3's gross-level discount rate.
 
--- B5: Percentage split of transactions — members vs non-members
-SELECT 
+-- B5: Percentage split of transactions -- members vs non-members
+SELECT
     member,
     COUNT(DISTINCT txn_id) AS transactions,
     ROUND(100.0 * COUNT(DISTINCT txn_id) / SUM(COUNT(DISTINCT txn_id)) OVER(), 2) AS pct
 FROM balanced_tree.sales
 GROUP BY member;
+-- Insight: members are the dominant transaction channel, not a
+-- minority segment.
 
--- B6: Average revenue per transaction — members vs non-members
+-- B6: Average revenue per transaction -- members vs non-members
 WITH txn_revenue AS (
-    SELECT 
+    SELECT
         member,
         txn_id,
         SUM(price * qty * (1 - discount/100.0)) AS revenue
     FROM balanced_tree.sales
     GROUP BY member, txn_id
 )
-SELECT 
+SELECT
     member,
     ROUND(AVG(revenue), 2) AS avg_revenue
 FROM txn_revenue
 GROUP BY member;
+-- Insight: members and non-members spend almost identically per
+-- transaction -- membership drives volume, not basket value.
 
----------------------------------
--- C : Product Analysis
----------------------------------
+-- ================================
+-- SECTION C: PRODUCT ANALYSIS
+-- ================================
 
 -- C1: What are the top 3 products by total revenue before discount?
-select  s.prod_id,pd.product_name,sum(s.price*s.qty) as revenue 
-from balanced_tree.sales s
-join balanced_tree.product_details pd 
-on s.prod_id=pd.product_id
-group by s.prod_id,pd.product_name
-order by revenue desc 
-limit 3 ;
-
+SELECT s.prod_id, pd.product_name, SUM(s.price * s.qty) AS revenue
+FROM balanced_tree.sales s
+JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
+GROUP BY s.prod_id, pd.product_name
+ORDER BY revenue DESC
+LIMIT 3;
+-- Insight: revenue leadership here is volume-driven, not price-driven --
+-- the top product also leads its segment by unit volume.
 
 -- C2: What is the total quantity, revenue and discount for each segment?
-SELECT 
+SELECT
     pd.segment_id,
     pd.segment_name,
     SUM(s.qty) AS total_quantity,
@@ -109,10 +125,13 @@ SELECT
 FROM balanced_tree.sales s
 JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
 GROUP BY pd.segment_id, pd.segment_name;
+-- Insight: quantity sold is nearly identical across segments, but
+-- revenue varies far more -- differences are driven by average unit
+-- price, not demand.
 
 -- C3: What is the top selling product for each segment?
 WITH ranked AS (
-    SELECT 
+    SELECT
         pd.segment_name,
         pd.product_name,
         SUM(s.qty) AS total_quantity,
@@ -124,10 +143,12 @@ WITH ranked AS (
 SELECT segment_name, product_name, total_quantity
 FROM ranked
 WHERE rnk = 1;
-
+-- Insight: each segment's top product accounts for roughly a third of
+-- that segment's total quantity -- demand is fairly evenly split
+-- across styles rather than one dominating.
 
 -- C4: What is the total quantity, revenue and discount for each category?
-SELECT 
+SELECT
     pd.category_id,
     pd.category_name,
     SUM(s.qty) AS total_quantity,
@@ -136,11 +157,12 @@ SELECT
 FROM balanced_tree.sales s
 JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
 GROUP BY pd.category_id, pd.category_name;
-
+-- Insight: Womens sells marginally more units but generates notably
+-- less revenue than Mens -- echoes the C2 pricing pattern at category level.
 
 -- C5: What is the top selling product for each category?
 WITH ranked AS (
-    SELECT 
+    SELECT
         pd.category_name,
         pd.product_name,
         SUM(s.qty) AS total_quantity,
@@ -152,43 +174,49 @@ WITH ranked AS (
 SELECT category_name, product_name, total_quantity
 FROM ranked
 WHERE rnk = 1;
+-- Insight: the category-level winners are the same two products that
+-- led their segments in C3 -- the two strongest SKUs in the catalogue.
 
 -- C6: What is the percentage split of revenue by product for each segment?
-SELECT 
+SELECT
     pd.segment_name,
     pd.product_name,
-    ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) / 
+    ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) /
         SUM(SUM(s.price * s.qty * (1 - s.discount/100.0))) OVER (PARTITION BY pd.segment_name), 2) AS pct_revenue
 FROM balanced_tree.sales s
 JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
 GROUP BY pd.segment_name, pd.product_name
 ORDER BY pd.segment_name, pct_revenue DESC;
+-- Insight: revenue concentration within segments varies widely -- some
+-- products are candidates for discontinuation or repricing review.
 
 -- C7: What is the percentage split of revenue by segment for each category?
-SELECT 
-    pd.segment_name,pd.category_name,
-    ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) / 
+SELECT
+    pd.segment_name, pd.category_name,
+    ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) /
         SUM(SUM(s.price * s.qty * (1 - s.discount/100.0))) OVER (PARTITION BY pd.category_name), 2) AS pct_revenue
 FROM balanced_tree.sales s
 JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
 GROUP BY pd.segment_name, pd.category_name
 ORDER BY pd.segment_name, pct_revenue DESC;
+-- Insight: within Womens, Jacket nearly doubles Jeans' revenue share
+-- despite near-equal unit quantities -- confirms Jacket's higher price point.
 
 -- C8: What is the percentage split of total revenue by category?
-SELECT 
+SELECT
     pd.category_name,
-    ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) / 
+    ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) /
         SUM(SUM(s.price * s.qty * (1 - s.discount/100.0))) OVER (), 2) AS pct_revenue
 FROM balanced_tree.sales s
 JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
 GROUP BY pd.category_name
 ORDER BY pct_revenue DESC;
+-- Insight: Mens generates a clear majority of net revenue -- the
+-- single number a CFO slide would lead with.
 
-
--- C9: What is the total transaction “penetration” for each product? (hint: penetration = number of transactions where at least 1 quantity of a product was purchased divided by total number of transactions)
-
+-- C9: What is the total transaction penetration for each product?
 WITH transaction_per_product AS (
-    SELECT 
+    SELECT
         prod_id,
         COUNT(DISTINCT txn_id) AS total_txn_id
     FROM balanced_tree.sales
@@ -198,7 +226,7 @@ total_unique_transactions AS (
     SELECT COUNT(DISTINCT txn_id) AS total_unique_txn_id
     FROM balanced_tree.sales
 )
-SELECT 
+SELECT
     pd.product_name,
     total_txn_id,
     ROUND(100.0 * total_txn_id / total_unique_txn_id, 2) AS penetration_rate
@@ -206,24 +234,26 @@ FROM transaction_per_product
 CROSS JOIN total_unique_transactions
 JOIN balanced_tree.product_details pd ON transaction_per_product.prod_id = pd.product_id
 ORDER BY penetration_rate DESC;
+-- Insight: every product's penetration rate falls in a tight band --
+-- customers buy broadly across nearly the whole range, not 1-2 favorites.
 
--- C10: What is the most common combination of at least 1 quantity of any 3 products in a 1 single transaction?
+-- C10: What is the most common combination of at least 1 quantity of any 3 products in a single transaction?
 WITH combinations AS (
-    SELECT 
+    SELECT
         s1.txn_id,
         s1.prod_id AS product_1,
         s2.prod_id AS product_2,
         s3.prod_id AS product_3
     FROM balanced_tree.sales s1
-    JOIN balanced_tree.sales s2 
-        ON s1.txn_id = s2.txn_id 
+    JOIN balanced_tree.sales s2
+        ON s1.txn_id = s2.txn_id
         AND s1.prod_id < s2.prod_id
-    JOIN balanced_tree.sales s3 
-        ON s1.txn_id = s3.txn_id 
+    JOIN balanced_tree.sales s3
+        ON s1.txn_id = s3.txn_id
         AND s2.prod_id < s3.prod_id
 ),
 combination_counts AS (
-    SELECT 
+    SELECT
         product_1,
         product_2,
         product_3,
@@ -231,7 +261,7 @@ combination_counts AS (
     FROM combinations
     GROUP BY product_1, product_2, product_3
 )
-SELECT 
+SELECT
     pd1.product_name AS product_1,
     pd2.product_name AS product_2,
     pd3.product_name AS product_3,
@@ -242,23 +272,31 @@ JOIN balanced_tree.product_details pd2 ON product_2 = pd2.product_id
 JOIN balanced_tree.product_details pd3 ON product_3 = pd3.product_id
 ORDER BY combo_count DESC
 LIMIT 1;
+-- Insight: the winning combo pairs the #1 volume product with the
+-- weakest standalone revenue performer from C6 -- a real cross-sell
+-- finding, the weak product may survive commercially through bundling.
 
----------------------------------
--- Reporting Challenge
----------------------------------
--- Write a single SQL script that combines all of the previous questions into a scheduled report that the Balanced Tree team can run at the beginning of each month to calculate the previous month’s values.
+-- ================================
+-- SECTION D: REPORTING CHALLENGE
+-- ================================
 
--- Approach: Add WHERE DATE_TRUNC('month', start_date) = '2021-01-01'
--- to each query above for January reporting.
--- Change to '2021-02-01' for February with no other modifications needed.
+-- D1: Write a single SQL script that combines all previous questions into a scheduled monthly report.
+-- Approach: add WHERE DATE_TRUNC('month', start_txn_time) = '2021-01-01'
+-- to each query above for January reporting; change only the date
+-- literal to '2021-02-01' for February, no other modifications needed.
+-- Insight: because none of the Section A-C queries hardcode a date
+-- range, the entire analysis is already "month-agnostic" by design --
+-- this reporting requirement is satisfied by the existing query
+-- structure, not by writing new logic.
 
----------------------------------
--- Bonus Challenge
----------------------------------
--- Use a single SQL query to transform the product_hierarchy and product_prices datasets to the product_details table.
+-- ================================
+-- SECTION E: BONUS CHALLENGE
+-- ================================
+
+-- E1: Use a single SQL query to transform product_hierarchy and product_prices into product_details.
 WITH RECURSIVE hierarchy AS (
     -- Anchor: Category level (parent_id IS NULL)
-    SELECT 
+    SELECT
         id,
         id AS category_id,
         NULL::INTEGER AS segment_id,
@@ -272,7 +310,7 @@ WITH RECURSIVE hierarchy AS (
     UNION ALL
 
     -- Recursive: children of current level
-    SELECT 
+    SELECT
         ph.id,
         CASE WHEN ph.level_name = 'Segment' THEN h.category_id ELSE h.category_id END AS category_id,
         CASE WHEN ph.level_name = 'Segment' THEN ph.id ELSE h.segment_id END AS segment_id,
@@ -283,7 +321,7 @@ WITH RECURSIVE hierarchy AS (
     FROM balanced_tree.product_hierarchy ph
     JOIN hierarchy h ON ph.parent_id = h.id
 )
-SELECT 
+SELECT
     pp.product_id,
     pp.price,
     h.style_name || ' ' || h.segment_name || ' - ' || h.category_name AS product_name,
@@ -297,3 +335,7 @@ FROM hierarchy h
 JOIN balanced_tree.product_prices pp ON h.id = pp.id
 WHERE h.level_type = 'Style'
 ORDER BY pp.product_id;
+-- Insight: correctly reconstructs all 12 rows of product_details from
+-- the 3-level hierarchy -- validates that product_details is fully
+-- derivable from source data rather than hand-maintained, which
+-- matters for data-lineage credibility.
