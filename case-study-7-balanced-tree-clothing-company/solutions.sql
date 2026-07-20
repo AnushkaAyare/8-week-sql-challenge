@@ -6,18 +6,18 @@
 -- SECTION A: HIGH LEVEL SALES ANALYSIS
 -- ================================
 
--- A1: Total quantity sold
+-- Q1: Total quantity sold
 SELECT SUM(qty) AS total_quantity
 FROM balanced_tree.sales;
 -- Insight: baseline volume figure the rest of the analysis is measured against.
 
--- A2: Total revenue before discounts
+-- Q2: Total revenue before discounts
 SELECT SUM(price * qty) AS total_revenue
 FROM balanced_tree.sales;
 -- Insight: top-line figure the CFO report needs -- every discount and
 -- net-revenue metric below should reconcile back to this number.
 
--- A3: Total discount amount
+-- Q3: Total discount amount
 SELECT ROUND(SUM(price * qty * discount / 100.0), 2) AS total_discount
 FROM balanced_tree.sales;
 -- Insight: roughly 12% of gross revenue -- a meaningful margin
@@ -27,12 +27,12 @@ FROM balanced_tree.sales;
 -- SECTION B: TRANSACTION ANALYSIS
 -- ================================
 
--- B1: Unique transactions
+-- Q1: Unique transactions
 SELECT COUNT(DISTINCT txn_id) AS unique_transactions
 FROM balanced_tree.sales;
 -- Insight: combined with A2, gives average revenue per transaction.
 
--- B2: Average unique products per transaction
+-- Q2: Average unique products per transaction
 WITH count_products AS (
     SELECT
         txn_id,
@@ -45,7 +45,7 @@ FROM count_products;
 -- Insight: a strong basket size for apparel -- suggests bundling or
 -- store layout is working, not just single-item purchases.
 
--- B3: 25th, 50th, 75th percentile of revenue per transaction
+-- Q3: 25th, 50th, 75th percentile of revenue per transaction
 WITH revenue AS (
     SELECT
         txn_id,
@@ -62,7 +62,7 @@ FROM revenue;
 -- -- revenue per transaction is right-skewed, a few high-value
 -- transactions pull the average up.
 
--- B4: Average discount value per transaction
+-- Q4: Average discount value per transaction
 WITH discount_per_txn AS (
     SELECT
         txn_id,
@@ -74,7 +74,7 @@ SELECT ROUND(AVG(discount_value), 2) AS avg_discount_per_txn
 FROM discount_per_txn;
 -- Insight: consistent with A3's gross-level discount rate.
 
--- B5: Percentage split of transactions -- members vs non-members
+-- Q5: Percentage split of transactions -- members vs non-members
 SELECT
     member,
     COUNT(DISTINCT txn_id) AS transactions,
@@ -84,7 +84,7 @@ GROUP BY member;
 -- Insight: members are the dominant transaction channel, not a
 -- minority segment.
 
--- B6: Average revenue per transaction -- members vs non-members
+-- Q6: Average revenue per transaction -- members vs non-members
 WITH txn_revenue AS (
     SELECT
         member,
@@ -105,7 +105,7 @@ GROUP BY member;
 -- SECTION C: PRODUCT ANALYSIS
 -- ================================
 
--- C1: What are the top 3 products by total revenue before discount?
+-- Q1: What are the top 3 products by total revenue before discount?
 SELECT s.prod_id, pd.product_name, SUM(s.price * s.qty) AS revenue
 FROM balanced_tree.sales s
 JOIN balanced_tree.product_details pd ON s.prod_id = pd.product_id
@@ -115,7 +115,7 @@ LIMIT 3;
 -- Insight: revenue leadership here is volume-driven, not price-driven --
 -- the top product also leads its segment by unit volume.
 
--- C2: What is the total quantity, revenue and discount for each segment?
+-- Q2: What is the total quantity, revenue and discount for each segment?
 SELECT
     pd.segment_id,
     pd.segment_name,
@@ -129,7 +129,7 @@ GROUP BY pd.segment_id, pd.segment_name;
 -- revenue varies far more -- differences are driven by average unit
 -- price, not demand.
 
--- C3: What is the top selling product for each segment?
+-- Q3: What is the top selling product for each segment?
 WITH ranked AS (
     SELECT
         pd.segment_name,
@@ -147,7 +147,7 @@ WHERE rnk = 1;
 -- that segment's total quantity -- demand is fairly evenly split
 -- across styles rather than one dominating.
 
--- C4: What is the total quantity, revenue and discount for each category?
+-- Q4: What is the total quantity, revenue and discount for each category?
 SELECT
     pd.category_id,
     pd.category_name,
@@ -160,7 +160,7 @@ GROUP BY pd.category_id, pd.category_name;
 -- Insight: Womens sells marginally more units but generates notably
 -- less revenue than Mens -- echoes the C2 pricing pattern at category level.
 
--- C5: What is the top selling product for each category?
+-- Q5: What is the top selling product for each category?
 WITH ranked AS (
     SELECT
         pd.category_name,
@@ -177,7 +177,7 @@ WHERE rnk = 1;
 -- Insight: the category-level winners are the same two products that
 -- led their segments in C3 -- the two strongest SKUs in the catalogue.
 
--- C6: What is the percentage split of revenue by product for each segment?
+-- Q6: What is the percentage split of revenue by product for each segment?
 SELECT
     pd.segment_name,
     pd.product_name,
@@ -190,7 +190,7 @@ ORDER BY pd.segment_name, pct_revenue DESC;
 -- Insight: revenue concentration within segments varies widely -- some
 -- products are candidates for discontinuation or repricing review.
 
--- C7: What is the percentage split of revenue by segment for each category?
+-- Q7: What is the percentage split of revenue by segment for each category?
 SELECT
     pd.segment_name, pd.category_name,
     ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) /
@@ -202,7 +202,7 @@ ORDER BY pd.segment_name, pct_revenue DESC;
 -- Insight: within Womens, Jacket nearly doubles Jeans' revenue share
 -- despite near-equal unit quantities -- confirms Jacket's higher price point.
 
--- C8: What is the percentage split of total revenue by category?
+-- Q8: What is the percentage split of total revenue by category?
 SELECT
     pd.category_name,
     ROUND(100.0 * SUM(s.price * s.qty * (1 - s.discount/100.0)) /
@@ -214,7 +214,7 @@ ORDER BY pct_revenue DESC;
 -- Insight: Mens generates a clear majority of net revenue -- the
 -- single number a CFO slide would lead with.
 
--- C9: What is the total transaction penetration for each product?
+-- Q9: What is the total transaction penetration for each product?
 WITH transaction_per_product AS (
     SELECT
         prod_id,
@@ -237,7 +237,7 @@ ORDER BY penetration_rate DESC;
 -- Insight: every product's penetration rate falls in a tight band --
 -- customers buy broadly across nearly the whole range, not 1-2 favorites.
 
--- C10: What is the most common combination of at least 1 quantity of any 3 products in a single transaction?
+-- Q10: What is the most common combination of at least 1 quantity of any 3 products in a single transaction?
 WITH combinations AS (
     SELECT
         s1.txn_id,
@@ -280,7 +280,7 @@ LIMIT 1;
 -- SECTION D: REPORTING CHALLENGE
 -- ================================
 
--- D1: Write a single SQL script that combines all previous questions into a scheduled monthly report.
+-- Q1: Write a single SQL script that combines all previous questions into a scheduled monthly report.
 -- Approach: add WHERE DATE_TRUNC('month', start_txn_time) = '2021-01-01'
 -- to each query above for January reporting; change only the date
 -- literal to '2021-02-01' for February, no other modifications needed.
@@ -293,7 +293,7 @@ LIMIT 1;
 -- SECTION E: BONUS CHALLENGE
 -- ================================
 
--- E1: Use a single SQL query to transform product_hierarchy and product_prices into product_details.
+-- Q1: Use a single SQL query to transform product_hierarchy and product_prices into product_details.
 WITH RECURSIVE hierarchy AS (
     -- Anchor: Category level (parent_id IS NULL)
     SELECT
