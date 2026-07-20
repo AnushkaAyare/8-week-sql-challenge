@@ -1,10 +1,12 @@
 -- ================================
 -- Case Study #8: Fresh Segments — 8 Week SQL Challenge, Danny Ma
 -- ================================
+
+-- ================================
 -- SECTION A: Data Exploration and Cleansing
 -- ================================
 
--- A1: Convert month_year to a real date, start-of-month.
+-- Q1: Convert month_year to a real date, start-of-month.
 -- Real format is 'Mon-YY' (e.g. Jul-18), not 'MM-YYYY' like the fake dataset.
 ALTER TABLE fresh_segments.interest_metrics
 ALTER COLUMN month_year TYPE date USING to_date(month_year, 'Mon-YY');
@@ -12,7 +14,7 @@ ALTER COLUMN month_year TYPE date USING to_date(month_year, 'Mon-YY');
 -- blank/NULL to begin with -- to_date(NULL, ...) returns NULL cleanly,
 -- it does not error.
 
--- A2: Count of records per month_year, chronological, nulls first.
+-- Q2: Count of records per month_year, chronological, nulls first.
 SELECT COUNT(*) AS count_of_records, month_year
 FROM fresh_segments.interest_metrics
 GROUP BY month_year
@@ -21,7 +23,7 @@ ORDER BY month_year NULLS FIRST;
 -- 729 (Jul 2018) up to 1,149 (Aug 2019) records -- a real, uneven spread,
 -- unlike the flat "10 every month" from the fake dataset.
 
--- A3: What should we do with the null values?
+-- Q3: What should we do with the null values?
 SELECT
     COUNT(*) FILTER (WHERE month_year IS NULL) AS null_rows,
     COUNT(*) AS total_rows,
@@ -37,7 +39,7 @@ FROM fresh_segments.interest_metrics;
 -- deleting the rows outright -- they may still carry information for
 -- other analyses, just not ones keyed on month or interest.
 
--- A4: interest_id mismatches between interest_metrics and interest_map.
+-- Q4: interest_id mismatches between interest_metrics and interest_map.
 SELECT COUNT(DISTINCT im.interest_id)
 FROM fresh_segments.interest_metrics im
 LEFT JOIN fresh_segments.interest_map map ON im.interest_id::integer = map.id
@@ -55,7 +57,7 @@ WHERE im.interest_id IS NULL;
 -- result (0) -- worth noting both are real, just asymmetric for a
 -- different reason than before.
 
--- A5: Summarise id values in interest_map by record count.
+-- Q5: Summarise id values in interest_map by record count.
 SELECT id, COUNT(*) AS cnt
 FROM fresh_segments.interest_map
 GROUP BY id
@@ -63,7 +65,7 @@ HAVING COUNT(*) > 1;
 -- Real result: 0 rows -- id is a clean, unique key, same conclusion as
 -- before, this time on real data of 1,209 rows rather than 15.
 
--- A6: Which join, and why? Verify with interest_id = 21246.
+-- Q6: Which join, and why? Verify with interest_id = 21246.
 -- LEFT JOIN, interest_metrics as the left table: preserves every metrics
 -- row even where a match is missing, instead of silently dropping rows
 -- the way an INNER JOIN would (relevant given the 1,194 null-interest_id
@@ -79,7 +81,7 @@ ORDER BY im.month_year;
 -- ranging ~1.58-2.26 across the months present -- this is the exact id the
 -- original case study asks you to check, confirming this dataset is genuine.
 
--- A7: Any records where month_year is before interest_map.created_at?
+-- Q7: Any records where month_year is before interest_map.created_at?
 SELECT COUNT(*)
 FROM fresh_segments.interest_metrics im
 LEFT JOIN fresh_segments.interest_map map ON im.interest_id::integer = map.id
@@ -99,7 +101,7 @@ WHERE im.month_year < map.created_at;
 -- SECTION B: Interest Analysis
 -- ================================
 
--- B1: Which interests present in all 14 months?
+-- Q1: Which interests present in all 14 months?
 WITH im AS (
     SELECT interest_id, COUNT(DISTINCT month_year) AS total_months
     FROM fresh_segments.interest_metrics
@@ -111,7 +113,7 @@ SELECT interest_id, total_months FROM im WHERE total_months = 14;
 -- a meaningful subset, not all of them, unlike the fake dataset where
 -- every single interest trivially qualified.
 
--- B2: Cumulative % of total_months -- which value passes 90%?
+-- Q2: Cumulative % of total_months -- which value passes 90%?
 WITH im AS (
     SELECT interest_id, COUNT(DISTINCT month_year) AS total_months
     FROM fresh_segments.interest_metrics
@@ -136,7 +138,7 @@ ORDER BY total_months;
 -- lopsided distribution (a huge cluster at full coverage), not because
 -- it was the only value that existed.
 
--- B3: Data points removed if we drop interests below that threshold (14).
+-- Q3: Data points removed if we drop interests below that threshold (14).
 WITH im AS (
     SELECT interest_id, COUNT(DISTINCT month_year) AS total_months
     FROM fresh_segments.interest_metrics
@@ -149,7 +151,7 @@ FROM im WHERE total_months < 14;
 -- substantial cut, genuinely worth debating (see B4), unlike the fake
 -- dataset's 0/0.
 
--- B4: Does this decision make business sense?
+-- Q4: Does this decision make business sense?
 -- Removing everything below full 14-month coverage would cut 722 of
 -- roughly 1,202 interests (60%) and 6,359 real data points -- that's an
 -- aggressive cut for a threshold this strict. Example: interest_id=21057
@@ -164,7 +166,7 @@ FROM im WHERE total_months < 14;
 -- it keeps interests with enough history to trend reliably, without
 -- discarding two-thirds of the dataset over a technicality.
 
--- B5: Unique interests per month after applying the >= 6 months filter
+-- Q5: Unique interests per month after applying the >= 6 months filter
 -- (using the Section C threshold, since B3's stricter =14 filter would
 -- leave every remaining month at a flat count and isn't the filter
 -- actually carried forward into the rest of the case study).
@@ -192,7 +194,7 @@ ORDER BY m.month_year;
 -- own stated threshold for this section)
 -- ================================
 
--- C1: Top 10 and bottom 10 interests by largest composition in any month
+-- Q1: Top 10 and bottom 10 interests by largest composition in any month
 --     (max composition per interest, filtered dataset, keep the month).
 WITH keep AS (
     SELECT interest_id FROM fresh_segments.interest_metrics
@@ -224,7 +226,7 @@ UNION ALL
 -- Genuinely different lists, real values -- a meaningful contrast this
 -- time, not the same 10 interests reversed.
 
--- C2: 5 interests with lowest average ranking.
+-- Q2: 5 interests with lowest average ranking.
 SELECT m.interest_id, map.interest_name, ROUND(AVG(m.ranking), 2) AS avg_ranking
 FROM fresh_segments.interest_metrics m
 LEFT JOIN fresh_segments.interest_map map ON m.interest_id::integer = map.id
@@ -236,7 +238,7 @@ LIMIT 5;
 -- Users (4.11), Mens Shoe Shoppers (5.93), Elite Cycling Gear Shoppers
 -- (7.80), Shoe Shoppers (9.36).
 
--- C3: 5 interests with largest stddev in percentile_ranking.
+-- Q3: 5 interests with largest stddev in percentile_ranking.
 SELECT m.interest_id, map.interest_name, ROUND(STDDEV(m.percentile_ranking), 2) AS stddev_percentile
 FROM fresh_segments.interest_metrics m
 LEFT JOIN fresh_segments.interest_map map ON m.interest_id::integer = map.id
@@ -248,7 +250,7 @@ LIMIT 5;
 -- Junkies (30.36), Techies (30.18), Entertainment Industry Decision
 -- Makers (28.97).
 
--- C4: Min/max percentile_ranking (+ month) for those 5 interests.
+-- Q4: Min/max percentile_ranking (+ month) for those 5 interests.
 WITH top5 AS (
     SELECT interest_id FROM fresh_segments.interest_metrics
     WHERE interest_id IS NOT NULL
@@ -274,7 +276,7 @@ ORDER BY interest_id, type;
 -- show a real, large collapse in relative standing over the window --
 -- not just high variance, a consistent one-directional decline.
 
--- C5: Describe these customers -- what to show/avoid.
+-- Q5: Describe these customers -- what to show/avoid.
 -- These 5 interests (largely entertainment/tech/media-adjacent: Android,
 -- TV, movies, general "Techies", entertainment industry professionals)
 -- started with strong percentile standing in mid-2018 and collapsed
@@ -293,7 +295,7 @@ ORDER BY interest_id, type;
 -- (avg composition = composition / index_value, rounded to 2 dp)
 -- ================================
 
--- D1: Top 10 interests by average composition, per month.
+-- Q1: Top 10 interests by average composition, per month.
 WITH ranked AS (
     SELECT month_year, interest_id,
         ROUND(composition / index_value, 2) AS avg_composition,
@@ -307,7 +309,7 @@ SELECT * FROM ranked WHERE rnk <= 10 ORDER BY month_year, rnk;
 -- fixed set every time) -- real month-to-month reshuffling, unlike the
 -- fake dataset's trivial "all 10 exist" answer.
 
--- D2: Of the top 10, which interest appears most often?
+-- Q2: Of the top 10, which interest appears most often?
 WITH ranked AS (
     SELECT month_year, interest_id,
         RANK() OVER (PARTITION BY month_year ORDER BY composition / index_value DESC) AS rnk
@@ -329,7 +331,7 @@ LIMIT 5;
 -- at 9 months each. A real, non-trivial answer with genuine competition
 -- for the top spot, unlike the fake dataset's single dominant "79".
 
--- D3: Average of the average composition for the top 10, per month.
+-- Q3: Average of the average composition for the top 10, per month.
 WITH ranked AS (
     SELECT month_year, interest_id,
         ROUND(composition / index_value, 2) AS avg_comp,
@@ -346,7 +348,7 @@ GROUP BY month_year ORDER BY month_year;
 -- -- a real regime change partway through the window, not the fake
 -- dataset's smooth, uniform decline across the whole period.
 
--- D4: 3-month rolling average of max avg composition, Sep 2018-Aug 2019,
+-- Q4: 3-month rolling average of max avg composition, Sep 2018-Aug 2019,
 --     plus the previous 2 months' top-ranked interest.
 WITH monthly_top AS (
     SELECT month_year, interest_id AS top_interest,
@@ -372,7 +374,7 @@ ORDER BY month_year;
 -- steep decline (not the fake dataset's gentle 2.30->2.16 slide), and it
 -- coincides exactly with the D3 regime change starting May 2019.
 
--- D5: Why might max average composition change month to month? Could it
+-- Q5: Why might max average composition change month to month? Could it
 --     signal something wrong with the business model?
 -- index_value is the normalizing/baseline factor in this ratio -- it can
 -- shift independently of any single interest's real popularity, so part
